@@ -49,8 +49,8 @@ void yuv2rgb(double y, uint8_t cb, uint8_t cr, uint8_t *r, uint8_t *g, uint8_t *
 		 8,   9,   10,  11,  12,  13, 14,  15
 	};
 
-	// Y is 0 to 31, with standard ntsc-j range applied.
-	y = (y / 31.0) * (235.0/255.0);
+	// Y is 0 to 31
+	y = (y / 31.0);
 
 	// Populate color coefficients to NTSC REC 601
 	struct color_coeff co = {0};
@@ -59,28 +59,22 @@ void yuv2rgb(double y, uint8_t cb, uint8_t cr, uint8_t *r, uint8_t *g, uint8_t *
 	// Normalize to MAX to -MAX for each signal. 14/15 roughly represents the standard
 	// reduction constants (235/255) that would be applicable to these signals. Since the
 	// table never goes below 1 or above 30 It's assumed this was intentional.
+	// Note that V_MAX seems slightly too low for tg16, which is why it is slightly reduced.
 
 	double pb = ((double) c_table[cb] / (c_table[31])) * co.u_max;
-	double pr = ((double) c_table[cr] / (c_table[31])) * co.v_max;
-
-	// The original signal was likely reduced directly from normalized U and V values to the
-	// ntsc reduced values with no intermediate u or v max values, however as this was simply
-	// reversed by the decoder, there's no need to introduce additional complexity or quantization
-	// errors by doing so here.
+	double pr = ((double) c_table[cr] / (c_table[31])) * (co.v_max * 0.96);
 
 	// Apply phase shift. This appears to vary a bit per system, but it definitely exists
 	// intentionally as without it, the colors would be non-sensical. This was based on
-	// a DUO-R belonging to Artemio. It's likely the result of an agressive RC filter on the
-	// video line.
+	// a DUO-R belonging to Artemio.
 
-	double phase_deg = -23.5; // in degrees
+	double phase_deg = -10.4; // in degrees
 	double rad = deg_to_rad(phase_deg);
 	double s = sin(rad);
 	double c = cos(rad);
 	double old_pb = pb;
 	pb = pb * c - pr * s;
 
-	phase_deg = -9.5; // in degrees
 	rad = deg_to_rad(phase_deg);
 	s = sin(rad);
 	c = cos(rad);
@@ -89,22 +83,17 @@ void yuv2rgb(double y, uint8_t cb, uint8_t cr, uint8_t *r, uint8_t *g, uint8_t *
 	// Reference NTSC YUV to RGB conversion.
 	yuv_to_rgb(&co, y, pb, pr, &r1, &g1, &b1);
 
-	// Create 8 bit colors
+	// Desaturate the colors to the range the system purportedly used. This is very close on the
+	// vectorscope.
+	desaturate_rgb_linear(&co, 192.0/255.0, &r1, &g1, &b1);
 
-	// Expand the range of colors from limited to full, as a television would have done.
-	double m = (255.0/235.0) * 255.0;
-	//double m = 255.0;
+	// Create 8 bit colors
+	double m = 255.0;
 	r1 *= m;
 	g1 *= m;
 	b1 *= m;
 
-	// double contrast = 30.0;
-	// double F = (259.0 * (255.0 + contrast)) / (255.0 * (259.0 - contrast));
-	// r1 = (F * ((r1 + 16) - 128.0)) + 128.0;
-	// g1 = (F * ((g1 + 16) - 128.0)) + 128.0;
-	// b1 = (F * ((b1 + 16) - 128.0)) + 128.0;
-
-	// Clip where needed
+	// Clip if/when needed
 	r1 = r1 > 255 ? 255 : r1 < 0 ? 0 : r1;
 	g1 = g1 > 255 ? 255 : g1 < 0 ? 0 : g1;
 	b1 = b1 > 255 ? 255 : b1 < 0 ? 0 : b1;
