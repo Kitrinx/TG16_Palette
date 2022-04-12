@@ -71,8 +71,8 @@ void pop_rec_const(COLOR_REC_T rec, struct color_coeff *co)
 			co->b = CO_B_601;
 	}
 
-	co->u_max = (co->g + co->r);
-	co->v_max = (co->g + co->b);
+	co->u_max = 0.436;//(co->g + co->r);
+	co->v_max = 0.615;//(co->g + co->b);
 }
 
 double ire_to_mv(double ire)
@@ -87,7 +87,7 @@ double mv_to_ire(double mv)
 
 double deg_to_rad(double deg)
 {
-	return deg / 180.0 * M_PI;
+	return deg * (M_PI / 180.0);
 }
 
 double rad_to_deg(double rad)
@@ -168,26 +168,56 @@ static void rgb_to_yuv(struct color_coeff *co, double r, double g, double b, dou
 // Convert un-reduced YUV to RGB
 static void yuv_to_rgb(struct color_coeff *co, double y, double u, double v, double *r, double *g, double *b)
 {
-	*r = y + v * (1.0 - co->r);
-	*g = y - u * (1.0 - co->b) * co->b / co->g - v * (1.0 - co->r) * co->r / co->g;
-	*b = y + u * (1.0 - co->b);
+	*r = y + v * ((1.0 - co->r) / co->v_max);
+	*g = y - u * ((co->b * (1.0 - co->b)) / (co->u_max * co->g)) - v * ((co->r * (1.0 - co->r)) / (co->v_max * co->g));
+	*b = y + u * ((1.0 - co->b) / co->u_max);
 }
 
-// Convert RGB to YCbCr
 void rgb_to_ycbcr(struct color_coeff *co, double r, double g, double b, double *y, double *cb, double *cr)
 {
+
 	*y = rgb_to_y(co, r, g, b);
-	*cb = 0.5 * ((b - *y) / (1.0 - co->b));
-	*cr = 0.5 * ((r - *y) / (1.0 - co->r));
+
+	*cb = b - (co->r * r) - (co->g * g);
+	*cr = r - (co->g * g) - (co->b * b);
 }
 
-// This does not assume a bit size, so scaling and reductions should be done afterwards
 void ycbcr_to_rgb(struct color_coeff *co, double y, double cb, double cr, double *r, double *g, double *b)
 {
-	*r = y + (co->v_max * 2.0) * cr;
-	*g = y - ((co->u_max * 2.0) * co->b) / (co->g * cb) - ((co->v_max * 2.0) * co->r) / (co->g * cr);
-	*b = y + (co->u_max * 2.0) * cb;
+	*r = y + cr * ((1.0 - co->r));
+	*g = y - cb * ((co->b * (1.0 - co->b)) / (co->g)) - cr * ((co->r * (1.0 - co->r)) / (co->g));
+	*b = y + cb * ((1.0 - co->b));
 }
+
+void desaturate_rgb(double factor, double *r, double *g, double *b)
+{
+	double L = 0.3 * *r + 0.6 * *g + 0.1 * *b;
+	*r = *r + factor * (L - *r);
+	*g = *g + factor * (L - *g);
+	*b = *b + factor * (L - *b);
+}
+void desaturate_rgb_linear(struct color_coeff *co, double factor, double *r, double *g, double *b)
+{
+	double y = rgb_to_y(co, *r, *g, *b);
+	*r = (*r * factor) + (y * (1.0 - factor));
+	*g = (*g * factor) + (y * (1.0 - factor));
+	*b = (*b * factor) + (y * (1.0 - factor));
+}
+// // Convert RGB to YCbCr
+// void rgb_to_ycbcr(struct color_coeff *co, double r, double g, double b, double *y, double *cb, double *cr)
+// {
+// 	*y = rgb_to_y(co, r, g, b);
+// 	*cb = 0.5 * ((b - *y) / (1.0 - co->b));
+// 	*cr = 0.5 * ((r - *y) / (1.0 - co->r));
+// }
+
+// // This does not assume a bit size, so scaling and reductions should be done afterwards
+// void ycbcr_to_rgb(struct color_coeff *co, double y, double cb, double cr, double *r, double *g, double *b)
+// {
+// 	*r = y + (co->v_max * 2.0) * cr;
+// 	*g = y - ((co->u_max * 2.0) * co->b) / (co->g * cb) - ((co->v_max * 2.0) * co->r) / (co->g * cr);
+// 	*b = y + (co->u_max * 2.0) * cb;
+// }
 
 // Creates a standard rec 601 U and V reduced value for composite video from (B-Y) and (R-Y)
 static void uv_reduce(double *u, double *v)
